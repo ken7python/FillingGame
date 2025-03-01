@@ -71,6 +71,10 @@ int main(){
     const int screenWidth = 800;
     const int screenHeight = 450;
 
+    float StartTime = GetTime();
+    bool GameClear = false;
+    float EndTime;
+
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
 
@@ -123,8 +127,17 @@ int main(){
         player.Draw();
 
         percent = (float)painted / (rows * cols) * 100;
+        if (percent == 100 && !GameClear){
+            EndTime = GetTime();
+            GameClear = true;
+        }
 
         DrawText(TextFormat("%d%%", (int)percent), 30, 30, 50, RED);
+
+        if (GameClear){
+            DrawText(TextFormat("Game Clear!"), 300, 100, 50, RED);
+            DrawText(TextFormat("Time: %f", EndTime - StartTime), 350, 150, 50, RED);
+        }
         
         //DrawFPS(10,10);
 
