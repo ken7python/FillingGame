@@ -1,5 +1,8 @@
-//c++ -std=c++11 main.cpp -lraylib && ./a.out
+//c++ -std=c++11 -I. main.cpp libsockpp.a -lraylib -arch arm64 && ./a.out
 #include <iostream>
+#include <sockpp/tcp_acceptor.h>
+#include <sockpp/stream_socket.h>
+#include <pthread.h>
 #include "raylib.h"
 #define GRID_SIZE 5
 
@@ -55,16 +58,45 @@ class CGrid{
             //cout << "Drawing(" << rec.x << "," << rec.y << ")" << endl;
         }
 
-        void ColPlayer(Player player){
-            if(CheckCollisionCircleRec(player.position,player.r,rec)){
+        bool ColPlayer(Player player){
+            if(!SameColor(player.GetColor()) && CheckCollisionCircleRec(player.position,player.r,rec)){
                 //cout << "Collision" << endl;
                 this->color = player.GetColor();
+                return true;
             }
+            return false;
         }
     private:
         Rectangle rec;
         Color color;
 };
+
+struct packet{
+    int row;
+    int col;
+    Color color;
+};
+
+struct argument{
+    bool come;
+    std::queue<packet> sendqueue;
+};
+
+void* sock_server(void* arg){
+    sockpp::tcp_acceptor acc(12345);
+    sockpp::tcp_socket sock = acc.accept();
+
+    std::cout << "player come.\n";
+
+    ((argument*)arg)->come = true;
+    char buf[1];
+    while(0 < sock.read(buf,sizeof(buf))){
+        std::cout << buf[0] << std::endl;
+        std::cout << ((argument*)arg)->sendqueue.size() << std::endl;
+    }
+
+    return NULL;
+}
 
 
 int main(){
@@ -77,6 +109,21 @@ int main(){
 
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
+
+    argument arg;
+    arg.come = false;
+    pthread_t th;
+    pthread_create(&th,NULL,sock_server,&arg);
+
+    while(!WindowShouldClose()){
+        if (arg.come){
+            break;
+        }
+        BeginDrawing();
+            ClearBackground(BLACK);
+            DrawText("Waitting a player...",350,250,50,WHITE);
+        EndDrawing();
+    }
 
     int rows = screenHeight / GRID_SIZE;
     int cols = screenWidth / GRID_SIZE;
@@ -112,7 +159,11 @@ int main(){
         j = 0;
         while(j < rows){
             while(i < cols){
-                grids[j][i].ColPlayer(player);
+                bool changed = grids[j][i].ColPlayer(player);
+                if(changed){
+                    packet pack = {j,i,player.GetColor()};
+                    arg.sendqueue.push(pack);
+                }
                 if (grids[j][i].SameColor(player.GetColor() )){
                     ++painted;
                 }
