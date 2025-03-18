@@ -1,7 +1,7 @@
-//c++ -std=c++11 -I. main.cpp libsockpp.a -lraylib -arch arm64 && ./a.out
+//c++ -std=c++11 -I. main.cpp libsockpp.a -lraylib -arch arm64 -o game && ./game localhost 12345
 #include <iostream>
 #include <sockpp/tcp_acceptor.h>
-#include <sockpp/stream_socket.h>
+#include <sockpp/tcp_connector.h>
 #include <pthread.h>
 #include "raylib.h"
 #define GRID_SIZE 5
@@ -78,28 +78,64 @@ struct packet{
 };
 
 struct argument{
+    const char* server_name;
+    const char* server_port;
     bool come;
+    sockpp::tcp_connector* sock;
     std::queue<packet> sendqueue;
+    std::queue<packet> recyqueue;
 };
 
-void* sock_server(void* arg){
-    sockpp::tcp_acceptor acc(12345);
-    sockpp::tcp_socket sock = acc.accept();
+void* sock_serverR(void* arg){
+    
+    sockpp::tcp_connector sock;
+    sock.connect( sockpp::inet_address(((argument*)arg)->server_name, atoi(((argument*)arg)->server_port)) );
 
-    std::cout << "player come.\n";
+    int ready;
+    sock.read(&ready, sizeof(ready));
 
-    ((argument*)arg)->come = true;
-    char buf[1];
-    while(0 < sock.read(buf,sizeof(buf))){
-        std::cout << buf[0] << std::endl;
-        std::cout << ((argument*)arg)->sendqueue.size() << std::endl;
+    if(ready){
+        ((argument*)arg)->come = true;
+        ((argument*)arg)->sock = &sock;
+        std::cout << "GO!!!!!!!!!!!!" << std::endl;
+        while(1){
+            packet p;
+            sock.read(&p,sizeof(p));
+            cout << p.row << "," << p.col << "," << ColorToInt(p.color) << endl;
+            ((argument*)arg)->recyqueue.push(p);
+        }
     }
 
     return NULL;
 }
+void* sock_serverW(void* arg){
+    while( !(((argument*)arg)->sock) ){
+        usleep(1000*10);
+    }
 
+    sockpp::tcp_connector* sock = ((argument*)arg)->sock;
 
-int main(){
+    while(1){
+        while( 0 < ((argument*)arg)->sendqueue.size()){
+            auto p = ((argument*)arg)->sendqueue.front();
+            ((argument*)arg)->sendqueue.pop();
+
+            sock->write(&p,sizeof(p));
+        }
+        usleep(1000*10);
+    }
+    
+
+    return NULL;
+}
+
+// ./a.out 192.168.0.13 12345
+// [  a0  ] [    a1    ] [ a2 ]
+int main(int n,char* a[]){
+    if (n < 3){
+        cout << "./a.out 192.168.xx,xx yyyy" << endl;
+        return 1;
+    }
     const int screenWidth = 800;
     const int screenHeight = 450;
 
@@ -111,9 +147,16 @@ int main(){
     SetTargetFPS(60);
 
     argument arg;
+    arg.server_name = a[1];
+    arg.server_port = a[2];
+
     arg.come = false;
-    pthread_t th;
-    pthread_create(&th,NULL,sock_server,&arg);
+    arg.sock = nullptr;
+    pthread_t thR;
+    pthread_create(&thR,NULL,sock_serverR,&arg);
+
+    pthread_t thW;
+    pthread_create(&thW,NULL,sock_serverW,&arg);
 
     while(!WindowShouldClose()){
         if (arg.come){
@@ -150,6 +193,13 @@ int main(){
     int painted;
 
     while (!WindowShouldClose()){
+
+        while( arg.recyqueue.size() > 0){
+            auto p = arg.recyqueue.front();
+            arg.recyqueue.pop();
+            grids[p.row][p.col].SetColor(WHITE);
+        }
+
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
