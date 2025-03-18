@@ -1,5 +1,8 @@
-//c++ -std=c++11 main.cpp -lraylib && ./a.out
+//c++ -std=c++11 -I. main.cpp libsockpp.a -lraylib -arch arm64 -o game && ./game localhost 12345
 #include <iostream>
+#include <sockpp/tcp_acceptor.h>
+#include <sockpp/tcp_connector.h>
+#include <pthread.h>
 #include "raylib.h"
 #define GRID_SIZE 5
 
@@ -55,19 +58,84 @@ class CGrid{
             //cout << "Drawing(" << rec.x << "," << rec.y << ")" << endl;
         }
 
-        void ColPlayer(Player player){
-            if(CheckCollisionCircleRec(player.position,player.r,rec)){
+        bool ColPlayer(Player player){
+            if(!SameColor(player.GetColor()) && CheckCollisionCircleRec(player.position,player.r,rec)){
                 //cout << "Collision" << endl;
                 this->color = player.GetColor();
+                return true;
             }
+            return false;
         }
     private:
         Rectangle rec;
         Color color;
 };
 
+struct packet{
+    int row;
+    int col;
+    Color color;
+};
 
-int main(){
+struct argument{
+    const char* server_name;
+    const char* server_port;
+    bool come;
+    sockpp::tcp_connector* sock;
+    std::queue<packet> sendqueue;
+    std::queue<packet> recyqueue;
+};
+
+void* sock_serverR(void* arg){
+    
+    sockpp::tcp_connector sock;
+    sock.connect( sockpp::inet_address(((argument*)arg)->server_name, atoi(((argument*)arg)->server_port)) );
+
+    int ready;
+    sock.read(&ready, sizeof(ready));
+
+    if(ready){
+        ((argument*)arg)->come = true;
+        ((argument*)arg)->sock = &sock;
+        std::cout << "GO!!!!!!!!!!!!" << std::endl;
+        while(1){
+            packet p;
+            sock.read(&p,sizeof(p));
+            cout << p.row << "," << p.col << "," << ColorToInt(p.color) << endl;
+            ((argument*)arg)->recyqueue.push(p);
+        }
+    }
+
+    return NULL;
+}
+void* sock_serverW(void* arg){
+    while( !(((argument*)arg)->sock) ){
+        usleep(1000*10);
+    }
+
+    sockpp::tcp_connector* sock = ((argument*)arg)->sock;
+
+    while(1){
+        while( 0 < ((argument*)arg)->sendqueue.size()){
+            auto p = ((argument*)arg)->sendqueue.front();
+            ((argument*)arg)->sendqueue.pop();
+
+            sock->write(&p,sizeof(p));
+        }
+        usleep(1000*10);
+    }
+    
+
+    return NULL;
+}
+
+// ./a.out 192.168.0.13 12345
+// [  a0  ] [    a1    ] [ a2 ]
+int main(int n,char* a[]){
+    if (n < 3){
+        cout << "./a.out 192.168.xx,xx yyyy" << endl;
+        return 1;
+    }
     const int screenWidth = 800;
     const int screenHeight = 450;
 
@@ -77,6 +145,28 @@ int main(){
 
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
+
+    argument arg;
+    arg.server_name = a[1];
+    arg.server_port = a[2];
+
+    arg.come = false;
+    arg.sock = nullptr;
+    pthread_t thR;
+    pthread_create(&thR,NULL,sock_serverR,&arg);
+
+    pthread_t thW;
+    pthread_create(&thW,NULL,sock_serverW,&arg);
+
+    while(!WindowShouldClose()){
+        if (arg.come){
+            break;
+        }
+        BeginDrawing();
+            ClearBackground(BLACK);
+            DrawText("Waitting a player...",350,250,50,WHITE);
+        EndDrawing();
+    }
 
     int rows = screenHeight / GRID_SIZE;
     int cols = screenWidth / GRID_SIZE;
@@ -103,6 +193,13 @@ int main(){
     int painted;
 
     while (!WindowShouldClose()){
+
+        while( arg.recyqueue.size() > 0){
+            auto p = arg.recyqueue.front();
+            arg.recyqueue.pop();
+            grids[p.row][p.col].SetColor(WHITE);
+        }
+
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
@@ -112,7 +209,11 @@ int main(){
         j = 0;
         while(j < rows){
             while(i < cols){
-                grids[j][i].ColPlayer(player);
+                bool changed = grids[j][i].ColPlayer(player);
+                if(changed){
+                    packet pack = {j,i,player.GetColor()};
+                    arg.sendqueue.push(pack);
+                }
                 if (grids[j][i].SameColor(player.GetColor() )){
                     ++painted;
                 }
