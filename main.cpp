@@ -82,8 +82,18 @@ struct argument{
     const char* server_port;
     bool come;
     sockpp::tcp_connector* sock;
+    pthread_mutex_t send_mtx;
     std::queue<packet> sendqueue;
-    std::queue<packet> recyqueue;
+    std::queue<packet> recvqueue;
+    pthread_mutex_t recv_mtx;
+    argument(){
+        pthread_mutex_init(&send_mtx, nullptr);
+        pthread_mutex_init(&recv_mtx, nullptr);
+    }
+    ~argument(){
+        pthread_mutex_destroy(&send_mtx);
+        pthread_mutex_destroy(&recv_mtx);
+    }
 };
 
 void* sock_serverR(void* arg){
@@ -102,7 +112,9 @@ void* sock_serverR(void* arg){
             packet p;
             sock.read(&p,sizeof(p));
             cout << p.row << "," << p.col << "," << ColorToInt(p.color) << endl;
-            ((argument*)arg)->recyqueue.push(p);
+            pthread_mutex_lock(&((argument*)arg)->recv_mtx);
+            ((argument*)arg)->recvqueue.push(p);
+            pthread_mutex_unlock(&((argument*)arg)->recv_mtx);
         }
     }
 
@@ -116,12 +128,14 @@ void* sock_serverW(void* arg){
     sockpp::tcp_connector* sock = ((argument*)arg)->sock;
 
     while(1){
+        pthread_mutex_lock(&((argument*)arg)->send_mtx);
         while( 0 < ((argument*)arg)->sendqueue.size()){
             auto p = ((argument*)arg)->sendqueue.front();
             ((argument*)arg)->sendqueue.pop();
 
             sock->write(&p,sizeof(p));
         }
+        pthread_mutex_unlock(&((argument*)arg)->send_mtx);
         usleep(1000*10);
     }
     
@@ -168,8 +182,8 @@ int main(int n,char* a[]){
         EndDrawing();
     }
 
-    int rows = screenHeight / GRID_SIZE;
-    int cols = screenWidth / GRID_SIZE;
+    const int rows = screenHeight / GRID_SIZE;
+    const int cols = screenWidth / GRID_SIZE;
     CGrid grids[rows][cols];
     int i = 0;
     int j = 0;
@@ -193,12 +207,13 @@ int main(int n,char* a[]){
     int painted;
 
     while (!WindowShouldClose()){
-
-        while( arg.recyqueue.size() > 0){
-            auto p = arg.recyqueue.front();
-            arg.recyqueue.pop();
+        pthread_mutex_lock(&arg.recv_mtx);
+        while( arg.recvqueue.size() > 0){
+            auto p = arg.recvqueue.front();
+            arg.recvqueue.pop();
             grids[p.row][p.col].SetColor(WHITE);
         }
+        pthread_mutex_unlock(&arg.recv_mtx);
 
         BeginDrawing();
 
@@ -212,7 +227,9 @@ int main(int n,char* a[]){
                 bool changed = grids[j][i].ColPlayer(player);
                 if(changed){
                     packet pack = {j,i,player.GetColor()};
+                    pthread_mutex_lock(&arg.send_mtx);
                     arg.sendqueue.push(pack);
+                    pthread_mutex_unlock(&arg.send_mtx);
                 }
                 if (grids[j][i].SameColor(player.GetColor() )){
                     ++painted;
