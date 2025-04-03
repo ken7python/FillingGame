@@ -153,9 +153,9 @@ int main(int n,char* a[]){
     const int screenWidth = 800;
     const int screenHeight = 450;
 
-    float StartTime = GetTime();
-    bool GameClear = false;
-    float EndTime;
+    //float StartTime = GetTime();
+    //bool GameClear = false;
+    //float EndTime;
 
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
@@ -204,22 +204,36 @@ int main(int n,char* a[]){
     }
 
     float percent;
+    float percent_enemy;
+
     int painted;
+    int painted_enemy;
+    Color enemy_color = WHITE;
+
+    int GameTime = 60;
+    int EndTime = GetTime() + GameTime;
+    int ThisTime = GetTime();
 
     while (!WindowShouldClose()){
         pthread_mutex_lock(&arg.recv_mtx);
         while( arg.recvqueue.size() > 0){
             auto p = arg.recvqueue.front();
             arg.recvqueue.pop();
-            grids[p.row][p.col].SetColor(WHITE);
+            grids[p.row][p.col].SetColor(enemy_color);
         }
         pthread_mutex_unlock(&arg.recv_mtx);
+
+        ThisTime = GetTime();
+        if (ThisTime > EndTime){
+            break;
+        }
 
         BeginDrawing();
 
         ClearBackground(RAYWHITE);
 
         painted = 0;
+        painted_enemy = 0;
         i = 0;
         j = 0;
         while(j < rows){
@@ -234,6 +248,9 @@ int main(int n,char* a[]){
                 if (grids[j][i].SameColor(player.GetColor() )){
                     ++painted;
                 }
+                if (grids[j][i].SameColor(enemy_color) ){
+                    ++painted_enemy;
+                }
                 grids[j][i].Draw();
                 ++i;
             }
@@ -245,21 +262,44 @@ int main(int n,char* a[]){
         player.Draw();
 
         percent = (float)painted / (rows * cols) * 100;
+        percent_enemy = (float)painted_enemy / (rows * cols) * 100;
+        /*
         if (percent == 100 && !GameClear){
             EndTime = GetTime();
             GameClear = true;
         }
+            */
 
-        DrawText(TextFormat("%d%%", (int)percent), 30, 30, 50, RED);
+        DrawText(TextFormat("Player:%d%%", (int)percent), 500, 30, 50, RED);
+        DrawText(TextFormat("Enemy:%d%%", (int)percent_enemy), 500, 90, 50, RED);
+        DrawText(TextFormat("Time: %d", EndTime - ThisTime ), 30, 30, 50, RED);
 
+        /*
         if (GameClear){
             DrawText(TextFormat("Game Clear!"), 300, 100, 50, RED);
             DrawText(TextFormat("Time: %f", EndTime - StartTime), 350, 150, 50, RED);
         }
+            */
         
         //DrawFPS(10,10);
 
         EndDrawing();
     }
+
+    while(!WindowShouldClose()){
+        BeginDrawing();
+            ClearBackground(RAYWHITE);
+            if (percent == percent_enemy){
+                DrawText(TextFormat("Draw"), 300, 100, 50, RED);
+            }else
+            if (percent > percent_enemy){
+                DrawText(TextFormat("You Win!"), 300, 100, 50, RED);
+            }else
+            if (percent < percent_enemy){
+                DrawText(TextFormat("You Lose!"), 300, 100, 50, RED);
+            }
+        EndDrawing();
+    }
+
     return 0;
 }
