@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include "raylib.h"
 #define GRID_SIZE 5
+#include <math.h>
 
 using namespace std;
 
@@ -143,6 +144,47 @@ void* sock_serverW(void* arg){
     return NULL;
 }
 
+const int screenWidth = 800;
+const int screenHeight = 450;
+
+struct FullScreenFunc{
+    int windowWidth;
+    int windowHeight;
+    float scale;
+    int scaledW;
+    int scaledH;
+    int offsetX;
+    int offsetY;
+
+    void drawTarget(RenderTexture2D* target){
+        BeginDrawing();
+                ClearBackground(BLACK);
+                windowWidth = GetScreenWidth();
+                windowHeight = GetScreenHeight();
+                scale = fminf((float)windowWidth / screenWidth, (float)windowHeight / screenHeight);
+                scaledW = screenWidth * scale;
+                scaledH = screenHeight * scale;
+                offsetX = (windowWidth - scaledW) / 2;
+                offsetY = (windowHeight - scaledH) / 2;
+
+                DrawTexturePro(
+                    target->texture,
+                    (Rectangle){0.0f, 0.0f, (float)screenWidth, -(float)screenHeight},
+                    (Rectangle){(float)offsetX, (float)offsetY, (float)scaledW, (float)scaledH},
+                    (Vector2){0, 0},
+                    0.0f,
+                    WHITE
+                );
+        EndDrawing();
+    }
+    Vector2 GetGameMouse() {
+        return (Vector2){
+            (GetMouseX() - this->offsetX) / this->scale,
+            (GetMouseY() - this->offsetY) / this->scale
+        };
+    }
+};
+
 // ./a.out 192.168.0.13 12345
 // [  a0  ] [    a1    ] [ a2 ]
 int main(int n,char* a[]){
@@ -150,15 +192,17 @@ int main(int n,char* a[]){
         cout << "./a.out 192.168.xx,xx yyyy" << endl;
         return 1;
     }
-    const int screenWidth = 800;
-    const int screenHeight = 450;
 
     //float StartTime = GetTime();
     //bool GameClear = false;
     //float EndTime;
 
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(screenWidth, screenHeight, "raylib [core] example - basic window");
     SetTargetFPS(60);
+
+    FullScreenFunc fullScreen;
+    RenderTexture2D target = LoadRenderTexture(screenWidth, screenHeight);
 
     argument arg;
     arg.server_name = a[1];
@@ -176,10 +220,12 @@ int main(int n,char* a[]){
         if (arg.come){
             break;
         }
-        BeginDrawing();
+        BeginTextureMode(target);
             ClearBackground(BLACK);
             DrawText("Waitting a player...",350,250,50,WHITE);
-        EndDrawing();
+        EndTextureMode();
+
+        fullScreen.drawTarget(&target);
     }
 
     const int rows = screenHeight / GRID_SIZE;
@@ -195,7 +241,7 @@ int main(int n,char* a[]){
         while(i < cols){
             //cout << "j: " << j << endl;
             //cout << "i: " << i << endl;
-            grids[j][i].SetPosition(Vector2{ (float)(i * GRID_SIZE + GRID_SIZE / 2),(float)(j * GRID_SIZE + GRID_SIZE / 2)});
+            grids[j][i].SetPosition(fullScreen.GetGameMouse());
             grids[j][i].SetColor(BLACK);
             ++i;
         }
@@ -228,66 +274,66 @@ int main(int n,char* a[]){
             break;
         }
 
-        BeginDrawing();
+        BeginTextureMode(target);
+            ClearBackground(RAYWHITE);
 
-        ClearBackground(RAYWHITE);
-
-        painted = 0;
-        painted_enemy = 0;
-        i = 0;
-        j = 0;
-        while(j < rows){
-            while(i < cols){
-                bool changed = grids[j][i].ColPlayer(player);
-                if(changed){
-                    packet pack = {j,i,player.GetColor()};
-                    pthread_mutex_lock(&arg.send_mtx);
-                    arg.sendqueue.push(pack);
-                    pthread_mutex_unlock(&arg.send_mtx);
-                }
-                if (grids[j][i].SameColor(player.GetColor() )){
-                    ++painted;
-                }
-                if (grids[j][i].SameColor(enemy_color) ){
-                    ++painted_enemy;
-                }
-                grids[j][i].Draw();
-                ++i;
-            }
+            painted = 0;
+            painted_enemy = 0;
             i = 0;
-            ++j;
-        }
+            j = 0;
+            while(j < rows){
+                while(i < cols){
+                    bool changed = grids[j][i].ColPlayer(player);
+                    if(changed){
+                        packet pack = {j,i,player.GetColor()};
+                        pthread_mutex_lock(&arg.send_mtx);
+                        arg.sendqueue.push(pack);
+                        pthread_mutex_unlock(&arg.send_mtx);
+                    }
+                    if (grids[j][i].SameColor(player.GetColor() )){
+                        ++painted;
+                    }
+                    if (grids[j][i].SameColor(enemy_color) ){
+                        ++painted_enemy;
+                    }
+                    grids[j][i].Draw();
+                    ++i;
+                }
+                i = 0;
+                ++j;
+            }
 
-        player.move();
-        player.Draw();
+            //player.move();
+            player.position = fullScreen.GetGameMouse();
+            player.Draw();
 
-        percent = (float)painted / (rows * cols) * 100;
-        percent_enemy = (float)painted_enemy / (rows * cols) * 100;
-        /*
-        if (percent == 100 && !GameClear){
-            EndTime = GetTime();
-            GameClear = true;
-        }
-            */
+            percent = (float)painted / (rows * cols) * 100;
+            percent_enemy = (float)painted_enemy / (rows * cols) * 100;
+            /*
+            if (percent == 100 && !GameClear){
+                EndTime = GetTime();
+                GameClear = true;
+            }
+                */
 
-        DrawText(TextFormat("Player:%d%%", (int)percent), 500, 30, 50, RED);
-        DrawText(TextFormat("Enemy:%d%%", (int)percent_enemy), 500, 90, 50, RED);
-        DrawText(TextFormat("Time: %d", EndTime - ThisTime ), 30, 30, 50, RED);
+            DrawText(TextFormat("Player:%d%%", (int)percent), 500, 30, 50, RED);
+            DrawText(TextFormat("Enemy:%d%%", (int)percent_enemy), 500, 90, 50, RED);
+            DrawText(TextFormat("Time: %d", EndTime - ThisTime ), 30, 30, 50, RED);
 
-        /*
-        if (GameClear){
-            DrawText(TextFormat("Game Clear!"), 300, 100, 50, RED);
-            DrawText(TextFormat("Time: %f", EndTime - StartTime), 350, 150, 50, RED);
-        }
-            */
-        
-        //DrawFPS(10,10);
-
-        EndDrawing();
+            /*
+            if (GameClear){
+                DrawText(TextFormat("Game Clear!"), 300, 100, 50, RED);
+                DrawText(TextFormat("Time: %f", EndTime - StartTime), 350, 150, 50, RED);
+            }
+                */
+            
+            //DrawFPS(10,10);
+        EndTextureMode();
+        fullScreen.drawTarget(&target);
     }
 
     while(!WindowShouldClose()){
-        BeginDrawing();
+        BeginTextureMode(target);
             ClearBackground(RAYWHITE);
             if (percent == percent_enemy){
                 DrawText(TextFormat("Draw"), 300, 100, 50, RED);
@@ -298,7 +344,8 @@ int main(int n,char* a[]){
             if (percent < percent_enemy){
                 DrawText(TextFormat("You Lose!"), 300, 100, 50, RED);
             }
-        EndDrawing();
+        EndTextureMode();
+        fullScreen.drawTarget(&target);
     }
 
     return 0;
